@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Start Sharing</title>
+    <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body>
+    <main class="container">
+        <h1>Share Your Screen</h1>
+        <p id="status">Not sharing</p>
+        <video id="preview" autoplay muted playsinline class="preview"></video>
+        <div class="controls">
+            <button id="startShare">Start Sharing</button>
+            <button id="stopShare" disabled>Stop Sharing</button>
+        </div>
+        <div id="linkArea" class="linkArea" style="display:none;">
+            <label>Share this link with viewers:</label>
+            <input id="sessionLink" readonly />
+        </div>
+    </main>
+    <script src="/sharer.js"></script>
+</body>
+
+</html>

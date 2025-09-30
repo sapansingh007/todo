@@ -1,0 +1,22 @@
+{
+    "name": "render-screen-share",
+    "version": "1.0.0",
+    "description": "Simple screen sharing app using WebRTC and WebSocket signaling, ready for Render deployment.",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "nodemon server.js"
+    },
+    "dependencies": {
+        "express": "^4.18.2",
+        "uuid": "^9.0.0",
+        "ws": "^8.13.0"
+    },
+    "devDependencies": {
+        "nodemon": "^2.0.22"
+    },
+    "engines": {
+        "node": ">=16"
+    },
+    "license": "MIT"
+}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>View Shared Screen</title>
+    <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body>
+    <main class="container">
+        <h1>Live Shared Screen</h1>
+        <p id="status">Connecting...</p>
+        <video id="remoteVideo" autoplay playsinline class="remoteVideo"></video>
+
+        <div class="viewer-controls">
+            <button id="screenshotBtn">Take Screenshot</button>
+        </div>
+
+        <section id="screenshots">
+            <h2>Captured Screenshots</h2>
+            <div id="shots"></div>
+        </section>
+    </main>
+    <script src="/viewer.js"></script>
+</body>
+
+</html>

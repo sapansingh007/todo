@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Screen Share</title>
+    <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body>
+    <main class="container">
+        <h1>Screen Share Demo</h1>
+        <p>Start a new screen sharing session or join one.</p>
+        <div class="actions">
+            <a class="button" href="/sharer.html">Start Sharing (Laptop)</a>
+            <div class="join">
+                <input id="sessionInput" placeholder="Paste session link or id" />
+                <button id="joinBtn">Join Session</button>
+            </div>
+        </div>
+    </main>
+    <script>
+        document.getElementById('joinBtn').addEventListener('click', () => {
+            const v = document.getElementById('sessionInput').value.trim();
+            if (!v) return alert('Enter session id or full link');
+            let id = v;
+            try { const url = new URL(v); id = url.pathname.split('/').pop(); } catch (e) { }
+            window.location = `/viewer.html?session=${encodeURIComponent(id)}`;
+        });
+    </script>
+</body>
+
+</html>
