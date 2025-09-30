@@ -54,6 +54,22 @@ button {
     border-radius: 6px
 }
 
+.videoWrap {
+    position: relative;
+}
+
+.playOverlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.35);
+    font-size: 18px;
+    border-radius: 6px;
+}
+
 .controls {
     margin-top: 12px;
     display: flex;

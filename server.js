@@ -15,6 +15,19 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Simple health check
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+// Provide ICE servers (STUN + optional TURN) to clients
+app.get('/iceServers', (req, res) => {
+    const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+    // Optional TURN configuration via environment variables
+    const turnUrl = process.env.TURN_URL;
+    const turnUser = process.env.TURN_USER;
+    const turnPass = process.env.TURN_PASS;
+    if (turnUrl && turnUser && turnPass) {
+        iceServers.push({ urls: turnUrl, username: turnUser, credential: turnPass });
+    }
+    res.json({ iceServers });
+});
+
 // Create a WebSocket server for signaling
 const wss = new WebSocket.Server({ server });
 
@@ -72,27 +85,31 @@ wss.on('connection', (ws) => {
                 break;
 
             case 'offer':
-                // payload: { target: 'viewerId', sdp }
+                // payload: { target: 'viewerId', sdp, sdpType }
                 if (ws.isSharer) {
-                    // send to specified viewer or broadcast
+                    // send to specified viewer or broadcast; forward sdpType when present
                     if (payload && payload.target) {
                         for (const v of room.viewers) {
                             if (v.id === payload.target && v.readyState === WebSocket.OPEN) {
-                                send(v, { type: 'offer', sdp: payload.sdp, from: ws.id });
+                                send(v, { type: 'offer', sdp: payload.sdp, sdpType: payload.sdpType, from: ws.id });
+                                console.log('forwarded offer to', v.id, 'from', ws.id);
                             }
                         }
                     } else {
                         for (const v of room.viewers) {
-                            if (v.readyState === WebSocket.OPEN) send(v, { type: 'offer', sdp: payload.sdp, from: ws.id });
+                            if (v.readyState === WebSocket.OPEN) {
+                                send(v, { type: 'offer', sdp: payload.sdp, sdpType: payload.sdpType, from: ws.id });
+                            }
                         }
                     }
                 }
                 break;
 
             case 'answer':
-                // viewer -> sharer
+                // viewer -> sharer (forward sdpType if present)
                 if (!ws.isSharer && room.sharer && room.sharer.readyState === WebSocket.OPEN) {
-                    send(room.sharer, { type: 'answer', sdp: payload.sdp, from: ws.id });
+                    send(room.sharer, { type: 'answer', sdp: payload.sdp, sdpType: payload.sdpType, from: ws.id });
+                    console.log('forwarded answer from', ws.id, 'to sharer');
                 }
                 break;
 
@@ -102,10 +119,12 @@ wss.on('connection', (ws) => {
                     // route to target
                     if (room.sharer && room.sharer.id === payload.target && room.sharer.readyState === WebSocket.OPEN) {
                         send(room.sharer, { type: 'ice-candidate', candidate: payload.candidate, from: ws.id });
+                        console.log('forwarded ICE candidate from', ws.id, 'to sharer');
                     } else {
                         for (const v of room.viewers) {
                             if (v.id === payload.target && v.readyState === WebSocket.OPEN) {
                                 send(v, { type: 'ice-candidate', candidate: payload.candidate, from: ws.id });
+                                console.log('forwarded ICE candidate from', ws.id, 'to viewer', v.id);
                                 break;
                             }
                         }
@@ -114,8 +133,10 @@ wss.on('connection', (ws) => {
                     // broadcast
                     if (ws.isSharer) {
                         for (const v of room.viewers) if (v.readyState === WebSocket.OPEN) send(v, { type: 'ice-candidate', candidate: payload.candidate, from: ws.id });
+                        console.log('broadcasted ICE candidate from sharer to all viewers');
                     } else if (room.sharer && room.sharer.readyState === WebSocket.OPEN) {
                         send(room.sharer, { type: 'ice-candidate', candidate: payload.candidate, from: ws.id });
+                        console.log('forwarded ICE candidate from viewer to sharer');
                     }
                 }
                 break;

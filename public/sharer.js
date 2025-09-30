@@ -11,6 +11,7 @@ let ws = null;
 let sessionId = null;
 // map viewerId -> RTCPeerConnection
 const pcs = new Map();
+let iceConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
 function setStatus(s) { status.textContent = s }
 
@@ -24,6 +25,8 @@ async function startSharing() {
     }
     preview.srcObject = localStream;
     setStatus('Connecting...');
+    // try to play preview (muted + playsinline allow autoplay on mobile browsers)
+    try { preview.play().then(() => console.log('preview playing')).catch(e => console.warn('preview play failed', e)); } catch (e) { }
 
     ws = new WebSocket((location.origin.replace(/^http/, 'ws')));
     ws.onopen = () => {
@@ -53,7 +56,11 @@ async function startSharing() {
             // viewer answered; set remote desc on matching pc
             const from = msg.from;
             const pc = pcs.get(from);
-            if (pc) await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+            if (pc) {
+                const desc = { type: (msg && msg.sdpType) ? msg.sdpType : 'answer', sdp: msg.sdp };
+                console.log('Setting remote description for', from, desc.type);
+                await pc.setRemoteDescription(desc);
+            }
         }
 
         if (msg.type === 'ice-candidate') {
@@ -96,7 +103,7 @@ function stopSharing() {
 }
 
 async function createOfferForViewer(viewerId) {
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    const pc = new RTCPeerConnection(iceConfig);
     pcs.set(viewerId, pc);
 
     // send ICE candidates to specific viewer
@@ -106,6 +113,10 @@ async function createOfferForViewer(viewerId) {
         }
     };
 
+    pc.onconnectionstatechange = () => console.log('pc.connectionState', pc.connectionState, 'for', viewerId);
+    pc.oniceconnectionstatechange = () => console.log('pc.iceConnectionState', pc.iceConnectionState, 'for', viewerId);
+    pc.onsignalingstatechange = () => console.log('pc.signalingState', pc.signalingState, 'for', viewerId);
+
     // add tracks
     if (localStream) {
         for (const t of localStream.getTracks()) pc.addTrack(t, localStream);
@@ -114,10 +125,23 @@ async function createOfferForViewer(viewerId) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    ws.send(JSON.stringify({ type: 'offer', sessionId, payload: { target: viewerId, sdp: offer.sdp } }));
+    // send full SDP object (type + sdp) to be explicit
+    ws.send(JSON.stringify({ type: 'offer', sessionId, payload: { target: viewerId, sdp: offer.sdp, sdpType: offer.type } }));
+}
+
+async function fetchIceServers() {
+    try {
+        const res = await fetch('/iceServers');
+        const j = await res.json();
+        if (j && j.iceServers) iceConfig = { iceServers: j.iceServers };
+        console.log('sharer iceConfig', iceConfig);
+    } catch (e) { console.warn('failed to fetch iceServers', e); }
 }
 
 startBtn.addEventListener('click', startSharing);
 stopBtn.addEventListener('click', stopSharing);
 
 window.addEventListener('beforeunload', () => { if (ws && ws.readyState === WebSocket.OPEN) ws.close(); });
+
+// prefetch ICE servers
+document.addEventListener('DOMContentLoaded', () => { fetchIceServers(); });

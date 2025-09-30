@@ -12,10 +12,14 @@
     <main class="container">
         <h1>Live Shared Screen</h1>
         <p id="status">Connecting...</p>
-        <video id="remoteVideo" autoplay playsinline class="remoteVideo"></video>
+        <div class="videoWrap">
+            <video id="remoteVideo" autoplay playsinline muted class="remoteVideo"></video>
+            <div id="playOverlay" class="playOverlay" style="display:none;">Tap to start</div>
+        </div>
 
         <div class="viewer-controls">
             <button id="screenshotBtn">Take Screenshot</button>
+            <button id="reconnectBtn" style="display:none;">Reconnect</button>
         </div>
 
         <section id="screenshots">
