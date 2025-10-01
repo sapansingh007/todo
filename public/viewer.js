@@ -47,11 +47,28 @@ async function runOcrOnCanvas(canvas) {
         let text = '';
         if (apiKey) {
             try {
-                setStatus('Calling OCR.space API...');
+                setStatus('Calling OCR.space API (client key)...');
                 const base64 = usedCanvas.toDataURL('image/png');
                 text = await callOcrSpace(base64);
             } catch (e) {
-                console.warn('OCR.space failed, falling back to local Tesseract', e);
+                console.warn('Client OCR.space call failed, will try server proxy', e);
+            }
+        }
+
+        // If no client key result, try server-side proxy if available
+        if (!text) {
+            try {
+                setStatus('Calling server OCR proxy...');
+                const base64 = usedCanvas.toDataURL('image/png');
+                const resp = await fetch('/api/ocr', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base64Image: base64 }) });
+                if (resp.ok) {
+                    const j = await resp.json();
+                    text = j && j.text ? j.text : '';
+                } else {
+                    console.warn('Server OCR proxy returned', resp.status);
+                }
+            } catch (e) {
+                console.warn('Server OCR proxy failed', e);
             }
         }
 
@@ -376,278 +393,164 @@ async function runOcrOnCanvas(canvas) {
         setOcrLoading(false);
         ocrInProgress = false;
     }
-}
-container.style.textAlign = 'center';
 
-const img = document.createElement('img');
-img.src = dataUrl;
-img.style.maxWidth = '100%';
-img.style.maxHeight = '80vh';
-img.alt = 'Screenshot fallback';
-container.appendChild(img);
+    // Append screenshot to the #shots list (used by mobile flow)
+    function appendScreenshotToList(dataUrl, meta) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'shot';
+        wrapper.style.display = 'block';
+        wrapper.style.padding = '8px';
+        wrapper.style.border = '1px solid #e5e7eb';
+        wrapper.style.borderRadius = '8px';
+        wrapper.style.background = '#fff';
 
-const info = document.createElement('div');
-info.style.color = '#fff';
-info.style.marginTop = '8px';
-info.textContent = meta && meta.capturedAt ? `Captured: ${new Date(meta.capturedAt).toLocaleString()}` : '';
-container.appendChild(info);
+        const img = document.createElement('img');
+        img.src = dataUrl;
+        img.style.width = '100%';
+        img.style.borderRadius = '6px';
+        wrapper.appendChild(img);
 
-const btnRow = document.createElement('div');
-btnRow.style.marginTop = '12px';
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'meta';
+        const time = meta && meta.capturedAt ? new Date(meta.capturedAt).toLocaleString() : new Date().toLocaleString();
+        metaDiv.innerHTML = `<div>Captured: ${time}</div><div>Source: remote</div>`;
+        wrapper.appendChild(metaDiv);
 
-const downloadBtn = document.createElement('a');
-downloadBtn.textContent = 'Download';
-downloadBtn.href = dataUrl;
-downloadBtn.download = `screenshot-${Date.now()}.png`;
-downloadBtn.style.marginRight = '12px';
-downloadBtn.style.color = '#fff';
-downloadBtn.style.background = '#007acc';
-downloadBtn.style.padding = '8px 12px';
-downloadBtn.style.borderRadius = '4px';
-downloadBtn.style.textDecoration = 'none';
-btnRow.appendChild(downloadBtn);
+        const actions = document.createElement('div');
+        actions.style.marginTop = '8px';
 
-const closeBtn = document.createElement('button');
-closeBtn.textContent = 'Close';
-closeBtn.style.padding = '8px 12px';
-closeBtn.style.borderRadius = '4px';
-closeBtn.onclick = () => { overlay.style.display = 'none'; };
-btnRow.appendChild(closeBtn);
+        const dl = document.createElement('a');
+        dl.href = dataUrl;
+        dl.download = `screenshot-${Date.now()}.png`;
+        dl.textContent = 'Download';
+        dl.style.display = 'inline-block';
+        dl.style.padding = '8px 12px';
+        dl.style.background = '#2563eb';
+        dl.style.color = '#fff';
+        dl.style.borderRadius = '6px';
+        dl.style.textDecoration = 'none';
+        actions.appendChild(dl);
 
-container.appendChild(btnRow);
-overlay.appendChild(container);
-overlay.style.display = 'flex';
-}
+        wrapper.appendChild(actions);
 
-// Append screenshot to the #shots list (used by mobile flow)
-function appendScreenshotToList(dataUrl, meta) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'shot';
-    wrapper.style.display = 'block';
-    wrapper.style.padding = '8px';
-    wrapper.style.border = '1px solid #e5e7eb';
-    wrapper.style.borderRadius = '8px';
-    wrapper.style.background = '#fff';
-
-    const img = document.createElement('img');
-    img.src = dataUrl;
-    img.style.width = '100%';
-    img.style.borderRadius = '6px';
-    wrapper.appendChild(img);
-
-    const metaDiv = document.createElement('div');
-    metaDiv.className = 'meta';
-    const time = meta && meta.capturedAt ? new Date(meta.capturedAt).toLocaleString() : new Date().toLocaleString();
-    metaDiv.innerHTML = `<div>Captured: ${time}</div><div>Source: remote</div>`;
-    wrapper.appendChild(metaDiv);
-
-    const actions = document.createElement('div');
-    actions.style.marginTop = '8px';
-
-    const dl = document.createElement('a');
-    dl.href = dataUrl;
-    dl.download = `screenshot-${Date.now()}.png`;
-    dl.textContent = 'Download';
-    dl.style.display = 'inline-block';
-    dl.style.padding = '8px 12px';
-    dl.style.background = '#2563eb';
-    dl.style.color = '#fff';
-    dl.style.borderRadius = '6px';
-    dl.style.textDecoration = 'none';
-    actions.appendChild(dl);
-
-    wrapper.appendChild(actions);
-
-    shots.prepend(wrapper);
-}
-
-// Mobile-specific: override takeScreenshot to request from sharer
-async function takeScreenshotMobile() {
-    const load = document.getElementById('screenshotLoading');
-    const btn = document.getElementById('screenshotBtn');
-
-    // OCR helpers
-    async function runOcrOnCanvas(canvas) {
-        if (ocrInProgress) return;
-        ocrInProgress = true;
-        setOcrLoading(true);
-        setStatus('Running OCR (remote)...');
-        +
-            // first attempt: OCR.space if user provided an API key in the UI
-            +        const apiKeyInput = document.getElementById('ocrSpaceKey');
-        +        const apiKey = apiKeyInput && apiKeyInput.value ? apiKeyInput.value.trim() : '';
-        +
-            // create a base64 PNG string from the canvas (respect resizing)
-            +        const usedCanvas = resizeCanvasToMax(canvas, OCR_MAX_DIM);
-        +        const base64 = usedCanvas.toDataURL('image/png');
-        +
-            +        // store canvas for cleanup later
-            +        lastCanvas = usedCanvas;
-        +
-            +        async function parseWithOcrSpace(base64png) {
-                +            try {
-                    +                setStatus('Calling OCR.space API...');
-                    +                const body = new URLSearchParams();
-                    +                body.append('base64Image', base64png);
-                    +                body.append('language', 'eng');
-                    +                body.append('isTable', 'false');
-                    +                body.append('OCREngine', '2');
-                    +
-                        +                const resp = await fetch('https://api.ocr.space/parse/image', {
-+ method: 'POST',
-                            +                    headers: {
-+ 'apikey': apiKey,
-                            +                        'Accept': 'application/json'
-                        +                    },
-                +                    body: body.toString()
-                    +                });
-        +                if (!resp.ok) throw new Error('OCR.space HTTP ' + resp.status);
-        +                const j = await resp.json();
-        +                if (!j || !j.ParsedResults || !j.ParsedResults.length) {
-            +                    throw new Error('No parsed results from OCR.space');
-            +                }
-        +                // Extract text field - use ParsedText if present
-            +                const parsedText = j.ParsedResults.map(p => p.ParsedText || '').join('\n');
-        +                return parsedText;
-        +            } catch (e) {
-            +                console.warn('OCR.space call failed', e);
-            +                throw e;
-            +            }
-    +        }
-+
-    +        try {
-        +            let text = '';
-        +            if (apiKey) {
-            +                try {
-                +                    text = await parseWithOcrSpace(base64);
-                +                } catch (e) {
-                    +                    // fall back to local Tesseract if remote call fails
-                        +                    console.warn('OCR.space failed, falling back to Tesseract', e);
-                    +                }
-            +            }
-        +            if (!text) {
-            +                // fallback to Tesseract (local) if OCR.space not used or failed
-                +                setStatus('Running local OCR (fallback)');
-            +                await initTesseractWorker().catch(e => { console.warn('init worker failed', e); });
-            +                if (tesseractWorker) {
-                +                    const blob = await new Promise(res => usedCanvas.toBlob(res, 'image/png'));
-                +                    const tres = await tesseractWorker.recognize(blob);
-                +                    text = (tres && tres.data && tres.data.text) ? tres.data.text : '';
-                +                }
-            +            }
-        +
-            +            // Apply extraction/filtering depending on selected mode (fulltext/regex/ai)
-            +            const mode = extractMode ? extractMode.value : 'fulltext';
-        +            // Do not expose raw image or full OCR result unless in Full Text mode — show only filtered content
-            +            extractResult.innerHTML = '';
-        +            if (!text) {
-            +                extractResult.textContent = 'No text recognized.';
-            +                setStatus('OCR complete: no text');
-            +            } else if (mode === 'fulltext') {
-                +                const d = document.createElement('div'); d.className = 'extract-item'; d.textContent = text; extractResult.appendChild(d);
-                +                setStatus('Extraction complete (full text)');
-                +            } else if (mode === 'regex') {
-                    +                const found = regexExtract(text, regexInput.value || '');
-                    +                if (found.length === 0) extractResult.textContent = 'No matches found.';
-                    +                else found.forEach(f => { const d = document.createElement('div'); d.className = 'extract-item'; d.textContent = f; extractResult.appendChild(d); });
-                    +                setStatus('Extraction complete (regex)');
-                    +            } else if (mode === 'ai') {
-                        +                try {
-                            +                    const out = await aiExtract(text, aiEndpoint.value, aiPrompt.value);
-                            +                    const d = document.createElement('div'); d.className = 'extract-item'; d.textContent = out; extractResult.appendChild(d);
-                            +                    setStatus('Extraction complete (AI)');
-                            +                } catch (e) {
-                                +                    extractResult.textContent = 'AI extraction failed: ' + (e && e.message ? e.message : '');
-                                +                    setStatus('AI extraction failed');
-                                +                }
-                        +            }
-        +
-            +            // ensure we DO NOT keep the base64 or raw text displayed anywhere else; hide raw textarea
-            +            if (ocrTextArea) { ocrTextArea.style.display = 'none'; ocrTextArea.value = ''; }
-        +        } catch (err) {
-            +            console.error('OCR pipeline failed', err);
-            +            extractResult.textContent = 'OCR failed: ' + (err && err.message ? err.message : 'Unknown');
-            +            setStatus('OCR failed');
-            +        } finally {
-    +            // cleanup canvas and memory
-        +            cleanupCanvas(lastCanvas);
-    +            lastCanvas = null;
-    +            setOcrLoading(false);
-    +            ocrInProgress = false;
-    +        }
-+
-     }
+        shots.prepend(wrapper);
     }
 
-async function runOcrOnDataUrl(dataUrl) {
-    // create canvas from dataUrl
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = async () => {
-            const c = document.createElement('canvas');
-            c.width = img.naturalWidth;
-            c.height = img.naturalHeight;
-            const ctx = c.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            try {
-                await runOcrOnCanvas(c);
-                resolve();
-            } catch (e) {
-                reject(e);
+    // Mobile-specific: override takeScreenshot to request from sharer
+    async function takeScreenshotMobile() {
+        const load = document.getElementById('screenshotLoading');
+        const btn = document.getElementById('screenshotBtn');
+
+        // show inline spinner
+        if (load) { load.style.display = 'inline'; load.innerHTML = '<span class="spinner" aria-hidden="true"></span> OCR...'; }
+        if (btn) btn.disabled = true;
+        // mark OCR in progress so incoming screenshot will be OCRed
+        ocrInProgress = true;
+        // show OCR loading UI
+        setOcrLoading(true);
+        // start initializing worker in background (non-blocking) so it's ready when image arrives
+        initTesseractWorker().catch(e => console.warn('tesseract init failed', e));
+        // set timeout to fail gracefully
+        if (pendingScreenshotTimer) clearTimeout(pendingScreenshotTimer);
+        pendingScreenshotTimer = setTimeout(() => {
+            if (load) { load.style.display = 'none'; load.innerHTML = ''; }
+            if (btn) btn.disabled = false;
+            setStatus('Screenshot request timed out');
+            pendingScreenshotTimer = null;
+            ocrInProgress = false;
+            setOcrLoading(false);
+        }, SCREENSHOT_TIMEOUT);
+
+        try {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'request-screenshot', sessionId }));
+                console.log('Requested screenshot from sharer (manual)');
+            } else {
+                if (load) { load.style.display = 'none'; load.innerHTML = ''; }
+                if (btn) btn.disabled = false;
+                alert('Signaling not connected');
+                ocrInProgress = false;
+                setOcrLoading(false);
             }
-        };
-        img.onerror = (e) => reject(new Error('Image load failed for OCR'));
-        img.src = dataUrl;
-    });
-}
+        } catch (e) {
+            console.warn(e);
+            if (load) { load.style.display = 'none'; load.innerHTML = ''; }
+            if (btn) btn.disabled = false;
+            if (pendingScreenshotTimer) { clearTimeout(pendingScreenshotTimer); pendingScreenshotTimer = null; }
+            ocrInProgress = false;
+            setOcrLoading(false);
+        }
+    }
 
-function cleanupCanvas(c) {
-    try {
-        if (!c) return;
-        const ctx = c.getContext && c.getContext('2d');
-        if (ctx) { ctx.clearRect(0, 0, c.width, c.height); }
-        // zero sizes to free memory
-        c.width = 0; c.height = 0;
-        // remove DOM reference if attached
-        if (c.parentNode) c.parentNode.removeChild(c);
-    } catch (e) { console.warn('cleanupCanvas failed', e); }
-}
-// show inline spinner
-if (load) { load.style.display = 'inline'; load.innerHTML = '<span class="spinner" aria-hidden="true"></span> OCR...'; }
-if (btn) btn.disabled = true;
-// mark OCR in progress so incoming screenshot will be OCRed
-ocrInProgress = true;
-// show OCR loading UI
-setOcrLoading(true);
-// start initializing worker in background (non-blocking) so it's ready when image arrives
-initTesseractWorker().catch(e => console.warn('tesseract init failed', e));
-// set timeout to fail gracefully
-if (pendingScreenshotTimer) clearTimeout(pendingScreenshotTimer);
-pendingScreenshotTimer = setTimeout(() => {
-    if (load) { load.style.display = 'none'; load.innerHTML = ''; }
-    if (btn) btn.disabled = false;
-    setStatus('Screenshot request timed out');
-    pendingScreenshotTimer = null;
-}, SCREENSHOT_TIMEOUT);
+    async function runOcrOnDataUrl(dataUrl) {
+        // create canvas from dataUrl
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = async () => {
+                const c = document.createElement('canvas');
+                c.width = img.naturalWidth;
+                c.height = img.naturalHeight;
+                const ctx = c.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                try {
+                    await runOcrOnCanvas(c);
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                }
+            };
+            img.onerror = (e) => reject(new Error('Image load failed for OCR'));
+            img.src = dataUrl;
+        });
+    }
 
-try {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'request-screenshot', sessionId }));
-        console.log('Requested screenshot from sharer (manual)');
-    } else {
+    function cleanupCanvas(c) {
+        try {
+            if (!c) return;
+            const ctx = c.getContext && c.getContext('2d');
+            if (ctx) { ctx.clearRect(0, 0, c.width, c.height); }
+            // zero sizes to free memory
+            c.width = 0; c.height = 0;
+            // remove DOM reference if attached
+            if (c.parentNode) c.parentNode.removeChild(c);
+        } catch (e) { console.warn('cleanupCanvas failed', e); }
+    }
+    // show inline spinner
+    if (load) { load.style.display = 'inline'; load.innerHTML = '<span class="spinner" aria-hidden="true"></span> OCR...'; }
+    if (btn) btn.disabled = true;
+    // mark OCR in progress so incoming screenshot will be OCRed
+    ocrInProgress = true;
+    // show OCR loading UI
+    setOcrLoading(true);
+    // start initializing worker in background (non-blocking) so it's ready when image arrives
+    initTesseractWorker().catch(e => console.warn('tesseract init failed', e));
+    // set timeout to fail gracefully
+    if (pendingScreenshotTimer) clearTimeout(pendingScreenshotTimer);
+    pendingScreenshotTimer = setTimeout(() => {
         if (load) { load.style.display = 'none'; load.innerHTML = ''; }
         if (btn) btn.disabled = false;
-        alert('Signaling not connected');
+        setStatus('Screenshot request timed out');
+        pendingScreenshotTimer = null;
+    }, SCREENSHOT_TIMEOUT);
+
+    try {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'request-screenshot', sessionId }));
+            console.log('Requested screenshot from sharer (manual)');
+        } else {
+            if (load) { load.style.display = 'none'; load.innerHTML = ''; }
+            if (btn) btn.disabled = false;
+            alert('Signaling not connected');
+        }
+    } catch (e) {
+        console.warn(e);
+        if (load) { load.style.display = 'none'; load.innerHTML = ''; }
+        if (btn) btn.disabled = false;
+        if (pendingScreenshotTimer) { clearTimeout(pendingScreenshotTimer); pendingScreenshotTimer = null; }
+        ocrInProgress = false;
+        setOcrLoading(false);
     }
-} catch (e) {
-    console.warn(e);
-    if (load) { load.style.display = 'none'; load.innerHTML = ''; }
-    if (btn) btn.disabled = false;
-    if (pendingScreenshotTimer) { clearTimeout(pendingScreenshotTimer); pendingScreenshotTimer = null; }
-    ocrInProgress = false;
-    setOcrLoading(false);
-}
 }
 
 // On load, if mobile, hide live video and wire screenshot button to mobile flow
