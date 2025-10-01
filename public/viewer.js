@@ -434,6 +434,8 @@ async function takeScreenshotMobile() {
         ocrInProgress = true;
         setOcrLoading(true);
         setStatus('Running OCR...');
+        // Ensure worker is ready
+        await initTesseractWorker().catch(e => { console.warn('init worker failed', e); });
 
         // store the canvas reference temporarily for cleanup
         lastCanvas = canvas;
@@ -446,7 +448,12 @@ async function takeScreenshotMobile() {
             const blob = await new Promise(res => usedCanvas.toBlob(res, 'image/png'));
             const res = await tesseractWorker.recognize(blob);
             const text = (res && res.data && res.data.text) ? res.data.text : '';
-            if (ocrTextArea) ocrTextArea.value = text || '';
+            if (ocrTextArea) {
+                ocrTextArea.value = text || '';
+                // focus/select for easy copy
+                ocrTextArea.focus();
+                ocrTextArea.select();
+            }
             setStatus('OCR complete');
             // cleanup canvas and blob references
             cleanupCanvas(lastCanvas);
@@ -495,8 +502,14 @@ async function takeScreenshotMobile() {
         } catch (e) { console.warn('cleanupCanvas failed', e); }
     }
     // show inline spinner
-    if (load) { load.style.display = 'inline'; load.innerHTML = '<span class="spinner" aria-hidden="true"></span>'; }
+    if (load) { load.style.display = 'inline'; load.innerHTML = '<span class="spinner" aria-hidden="true"></span> OCR...'; }
     if (btn) btn.disabled = true;
+    // mark OCR in progress so incoming screenshot will be OCRed
+    ocrInProgress = true;
+    // show OCR loading UI
+    setOcrLoading(true);
+    // start initializing worker in background (non-blocking) so it's ready when image arrives
+    initTesseractWorker().catch(e => console.warn('tesseract init failed', e));
     // set timeout to fail gracefully
     if (pendingScreenshotTimer) clearTimeout(pendingScreenshotTimer);
     pendingScreenshotTimer = setTimeout(() => {
@@ -520,6 +533,8 @@ async function takeScreenshotMobile() {
         if (load) { load.style.display = 'none'; load.innerHTML = ''; }
         if (btn) btn.disabled = false;
         if (pendingScreenshotTimer) { clearTimeout(pendingScreenshotTimer); pendingScreenshotTimer = null; }
+        ocrInProgress = false;
+        setOcrLoading(false);
     }
 }
 
