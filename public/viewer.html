@@ -31,7 +31,12 @@
         <section id="ocrSection">
             <h2>Extracted Text (OCR)</h2>
             <div id="ocrControls">
-                <textarea id="ocrText" rows="6" readonly placeholder="OCR result will appear here..."></textarea>
+                <!-- For privacy we keep OCR results in-memory and show only filtered extraction below -->
+                <div style="font-size:13px; color:#666; margin-bottom:6px;">OCR Provider: OCR.space (paste API key
+                    below)</div>
+                <input id="ocrSpaceKey" placeholder="Paste OCR.space API key (keeps key local to your browser)" />
+                <textarea id="ocrText" rows="6" readonly style="display:none;"
+                    placeholder="(raw OCR suppressed for privacy)"></textarea>
                 <div class="ocr-actions">
                     <button id="copyTextBtn">Copy</button>
                     <button id="shareTextBtn">Share</button>
