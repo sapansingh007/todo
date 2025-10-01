@@ -10,7 +10,7 @@
 
 <body>
     <main class="container">
-        <h1>Live Shared Screen</h1>
+        <h1 id="pageTitle">View Shared Screen</h1>
         <p id="status">Connecting...</p>
         <div class="videoWrap">
             <video id="remoteVideo" autoplay playsinline muted class="remoteVideo"></video>
@@ -19,6 +19,7 @@
 
         <div class="viewer-controls">
             <button id="screenshotBtn">Take Screenshot</button>
+            <span id="screenshotLoading" style="display:none; margin-left:8px;"></span>
             <button id="reconnectBtn" style="display:none;">Reconnect</button>
         </div>
 

@@ -10,26 +10,34 @@ if (!sessionId) {
     status.textContent = 'No session id provided';
 }
 
+// Basic mobile detection
+function isMobileDevice() {
+    return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+}
+
 let ws = null;
 let pc = null;
 let remoteStream = null; // dedicated MediaStream for remote tracks
 let iceConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 let watchdog = null;
 const PLAY_TIMEOUT = 5000; // ms to wait for frames before retry
+const SCREENSHOT_TIMEOUT = 12000; // ms to wait for a screenshot response
+let pendingScreenshotTimer = null;
 
 function setStatus(s) { status.textContent = s }
 
 function connectSignaling() {
     ws = new WebSocket((location.origin.replace(/^http/, 'ws')));
     ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'join-session', sessionId }));
+        ws.send(JSON.stringify({ type: 'join-session', sessionId, payload: { isMobile: isMobileDevice() } }));
         setStatus('Joined session, waiting for stream...');
     };
 
     ws.onmessage = async (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'offer') {
-            await handleOffer(msg.sdp, msg.from, msg.sdpType);
+            // On mobile we intentionally don't expect live offers; still handle if present
+            if (!isMobileDevice()) await handleOffer(msg.sdp, msg.from, msg.sdpType);
         }
         if (msg.type === 'ice-candidate') {
             if (pc && msg.candidate) pc.addIceCandidate(msg.candidate).catch(e => console.warn(e));
@@ -37,7 +45,15 @@ function connectSignaling() {
         // handle incoming screenshot from sharer (fallback)
         if (msg.type === 'screenshot') {
             console.log('Received screenshot from sharer', msg.meta);
-            showScreenshot(msg.dataUrl, msg.meta);
+            // hide loading indicator if visible
+            const load = document.getElementById('screenshotLoading'); if (load) { load.style.display = 'none'; load.innerHTML = ''; }
+            // clear pending timeout
+            if (pendingScreenshotTimer) { clearTimeout(pendingScreenshotTimer); pendingScreenshotTimer = null; }
+            // re-enable button
+            const btn = document.getElementById('screenshotBtn'); if (btn) btn.disabled = false;
+            setStatus('Screenshot received');
+            // append to shots list
+            appendScreenshotToList(msg.dataUrl, msg.meta);
         }
         if (msg.type === 'session-closed') {
             setStatus('Session closed');
@@ -196,67 +212,152 @@ screenshotBtn.addEventListener('click', takeScreenshot);
 
 connectSignaling();
 
-    // Display a fallback screenshot overlay with download
-    function showScreenshot(dataUrl, meta) {
-        // create overlay
-        let overlay = document.getElementById('screenshotOverlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'screenshotOverlay';
-            overlay.style.position = 'fixed';
-            overlay.style.left = '0';
-            overlay.style.top = '0';
-            overlay.style.width = '100%';
-            overlay.style.height = '100%';
-            overlay.style.background = 'rgba(0,0,0,0.85)';
-            overlay.style.display = 'flex';
-            overlay.style.alignItems = 'center';
-            overlay.style.justifyContent = 'center';
-            overlay.style.zIndex = 9999;
-            document.body.appendChild(overlay);
-        }
-        overlay.innerHTML = '';
-        const container = document.createElement('div');
-        container.style.maxWidth = '95%';
-        container.style.maxHeight = '95%';
-        container.style.textAlign = 'center';
-
-        const img = document.createElement('img');
-        img.src = dataUrl;
-        img.style.maxWidth = '100%';
-        img.style.maxHeight = '80vh';
-        img.alt = 'Screenshot fallback';
-        container.appendChild(img);
-
-        const info = document.createElement('div');
-        info.style.color = '#fff';
-        info.style.marginTop = '8px';
-        info.textContent = meta && meta.capturedAt ? `Captured: ${new Date(meta.capturedAt).toLocaleString()}` : '';
-        container.appendChild(info);
-
-        const btnRow = document.createElement('div');
-        btnRow.style.marginTop = '12px';
-
-        const downloadBtn = document.createElement('a');
-        downloadBtn.textContent = 'Download';
-        downloadBtn.href = dataUrl;
-        downloadBtn.download = `screenshot-${Date.now()}.png`;
-        downloadBtn.style.marginRight = '12px';
-        downloadBtn.style.color = '#fff';
-        downloadBtn.style.background = '#007acc';
-        downloadBtn.style.padding = '8px 12px';
-        downloadBtn.style.borderRadius = '4px';
-        downloadBtn.style.textDecoration = 'none';
-        btnRow.appendChild(downloadBtn);
-
-        const closeBtn = document.createElement('button');
-        closeBtn.textContent = 'Close';
-        closeBtn.style.padding = '8px 12px';
-        closeBtn.style.borderRadius = '4px';
-        closeBtn.onclick = () => { overlay.style.display = 'none'; };
-        btnRow.appendChild(closeBtn);
-
-        container.appendChild(btnRow);
-        overlay.appendChild(container);
+// Display a fallback screenshot overlay with download
+function showScreenshot(dataUrl, meta) {
+    // create overlay
+    let overlay = document.getElementById('screenshotOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'screenshotOverlay';
+        overlay.style.position = 'fixed';
+        overlay.style.left = '0';
+        overlay.style.top = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.background = 'rgba(0,0,0,0.85)';
         overlay.style.display = 'flex';
+        overlay.style.alignItems = 'center';
+        overlay.style.justifyContent = 'center';
+        overlay.style.zIndex = 9999;
+        document.body.appendChild(overlay);
     }
+    overlay.innerHTML = '';
+    const container = document.createElement('div');
+    container.style.maxWidth = '95%';
+    container.style.maxHeight = '95%';
+    container.style.textAlign = 'center';
+
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.style.maxWidth = '100%';
+    img.style.maxHeight = '80vh';
+    img.alt = 'Screenshot fallback';
+    container.appendChild(img);
+
+    const info = document.createElement('div');
+    info.style.color = '#fff';
+    info.style.marginTop = '8px';
+    info.textContent = meta && meta.capturedAt ? `Captured: ${new Date(meta.capturedAt).toLocaleString()}` : '';
+    container.appendChild(info);
+
+    const btnRow = document.createElement('div');
+    btnRow.style.marginTop = '12px';
+
+    const downloadBtn = document.createElement('a');
+    downloadBtn.textContent = 'Download';
+    downloadBtn.href = dataUrl;
+    downloadBtn.download = `screenshot-${Date.now()}.png`;
+    downloadBtn.style.marginRight = '12px';
+    downloadBtn.style.color = '#fff';
+    downloadBtn.style.background = '#007acc';
+    downloadBtn.style.padding = '8px 12px';
+    downloadBtn.style.borderRadius = '4px';
+    downloadBtn.style.textDecoration = 'none';
+    btnRow.appendChild(downloadBtn);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.padding = '8px 12px';
+    closeBtn.style.borderRadius = '4px';
+    closeBtn.onclick = () => { overlay.style.display = 'none'; };
+    btnRow.appendChild(closeBtn);
+
+    container.appendChild(btnRow);
+    overlay.appendChild(container);
+    overlay.style.display = 'flex';
+}
+
+// Append screenshot to the #shots list (used by mobile flow)
+function appendScreenshotToList(dataUrl, meta) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'shot';
+    wrapper.style.display = 'block';
+    wrapper.style.padding = '8px';
+    wrapper.style.border = '1px solid #e5e7eb';
+    wrapper.style.borderRadius = '8px';
+    wrapper.style.background = '#fff';
+
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.style.width = '100%';
+    img.style.borderRadius = '6px';
+    wrapper.appendChild(img);
+
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'meta';
+    const time = meta && meta.capturedAt ? new Date(meta.capturedAt).toLocaleString() : new Date().toLocaleString();
+    metaDiv.innerHTML = `<div>Captured: ${time}</div><div>Source: remote</div>`;
+    wrapper.appendChild(metaDiv);
+
+    const actions = document.createElement('div');
+    actions.style.marginTop = '8px';
+
+    const dl = document.createElement('a');
+    dl.href = dataUrl;
+    dl.download = `screenshot-${Date.now()}.png`;
+    dl.textContent = 'Download';
+    dl.style.display = 'inline-block';
+    dl.style.padding = '8px 12px';
+    dl.style.background = '#2563eb';
+    dl.style.color = '#fff';
+    dl.style.borderRadius = '6px';
+    dl.style.textDecoration = 'none';
+    actions.appendChild(dl);
+
+    wrapper.appendChild(actions);
+
+    shots.prepend(wrapper);
+}
+
+// Mobile-specific: override takeScreenshot to request from sharer
+async function takeScreenshotMobile() {
+    const load = document.getElementById('screenshotLoading');
+    const btn = document.getElementById('screenshotBtn');
+    // show inline spinner
+    if (load) { load.style.display = 'inline'; load.innerHTML = '<span class="spinner" aria-hidden="true"></span>'; }
+    if (btn) btn.disabled = true;
+    // set timeout to fail gracefully
+    if (pendingScreenshotTimer) clearTimeout(pendingScreenshotTimer);
+    pendingScreenshotTimer = setTimeout(() => {
+        if (load) { load.style.display = 'none'; load.innerHTML = ''; }
+        if (btn) btn.disabled = false;
+        setStatus('Screenshot request timed out');
+        pendingScreenshotTimer = null;
+    }, SCREENSHOT_TIMEOUT);
+
+    try {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'request-screenshot', sessionId }));
+            console.log('Requested screenshot from sharer (manual)');
+        } else {
+            if (load) { load.style.display = 'none'; load.innerHTML = ''; }
+            if (btn) btn.disabled = false;
+            alert('Signaling not connected');
+        }
+    } catch (e) {
+        console.warn(e);
+        if (load) { load.style.display = 'none'; load.innerHTML = ''; }
+        if (btn) btn.disabled = false;
+        if (pendingScreenshotTimer) { clearTimeout(pendingScreenshotTimer); pendingScreenshotTimer = null; }
+    }
+}
+
+// On load, if mobile, hide live video and wire screenshot button to mobile flow
+document.addEventListener('DOMContentLoaded', () => {
+    if (isMobileDevice()) {
+        // hide video preview for mobile viewers
+        const vw = document.querySelector('.videoWrap'); if (vw) vw.style.display = 'none';
+        // wire screenshot button
+        const btn = document.getElementById('screenshotBtn'); if (btn) { btn.removeEventListener('click', takeScreenshot); btn.addEventListener('click', takeScreenshotMobile); }
+    }
+});

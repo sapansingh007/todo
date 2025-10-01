@@ -74,13 +74,15 @@ wss.on('connection', (ws) => {
 
         switch (type) {
             case 'join-session':
+                // payload may include isMobile flag
+                const isMobile = payload && payload.isMobile;
                 room.viewers.add(ws);
                 ws.sessionId = sessionId;
                 ws.isSharer = false;
                 send(ws, { type: 'joined', sessionId });
-                // notify sharer a new viewer joined
+                // notify sharer a new viewer joined (include isMobile flag)
                 if (room.sharer && room.sharer.readyState === WebSocket.OPEN) {
-                    send(room.sharer, { type: 'viewer-joined', viewerId: ws.id });
+                    send(room.sharer, { type: 'viewer-joined', viewerId: ws.id, isMobile: !!isMobile });
                 }
                 break;
 

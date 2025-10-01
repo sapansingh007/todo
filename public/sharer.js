@@ -71,7 +71,13 @@ async function startSharing() {
 
         if (msg.type === 'viewer-joined') {
             const viewerId = msg.viewerId;
-            createOfferForViewer(viewerId);
+            // If the viewer reports as mobile, we won't create a live RTCPeerConnection
+            // and instead rely on screenshot requests. The server may include isMobile.
+            if (msg.isMobile) {
+                console.log('Mobile viewer joined, skipping live offer for', viewerId);
+            } else {
+                createOfferForViewer(viewerId);
+            }
         }
 
         if (msg.type === 'viewer-left') {
@@ -80,27 +86,27 @@ async function startSharing() {
             if (pc) { pc.close(); pcs.delete(id); }
         }
 
-            if (msg.type === 'request-screenshot') {
-                // msg.from is the viewer id requesting the screenshot
-                const targetViewer = msg.from;
-                console.log('Screenshot requested by', targetViewer);
-                // capture a frame from preview and send it
-                try {
-                    if (preview && preview.videoWidth && preview.videoHeight) {
-                        const canvas = document.createElement('canvas');
-                        canvas.width = preview.videoWidth;
-                        canvas.height = preview.videoHeight;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(preview, 0, 0, canvas.width, canvas.height);
-                        const dataUrl = canvas.toDataURL('image/png');
-                        const meta = { capturedAt: new Date().toISOString() };
-                        ws.send(JSON.stringify({ type: 'screenshot', sessionId, payload: { target: targetViewer, dataUrl, meta } }));
-                        console.log('Sent screenshot to server for viewer', targetViewer);
-                    } else {
-                        console.warn('Preview not ready for screenshot');
-                    }
-                } catch (e) { console.error('screenshot capture failed', e); }
-            }
+        if (msg.type === 'request-screenshot') {
+            // msg.from is the viewer id requesting the screenshot
+            const targetViewer = msg.from;
+            console.log('Screenshot requested by', targetViewer);
+            // capture a frame from preview and send it
+            try {
+                if (preview && preview.videoWidth && preview.videoHeight) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = preview.videoWidth;
+                    canvas.height = preview.videoHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(preview, 0, 0, canvas.width, canvas.height);
+                    const dataUrl = canvas.toDataURL('image/png');
+                    const meta = { capturedAt: new Date().toISOString() };
+                    ws.send(JSON.stringify({ type: 'screenshot', sessionId, payload: { target: targetViewer, dataUrl, meta } }));
+                    console.log('Sent screenshot to server for viewer', targetViewer);
+                } else {
+                    console.warn('Preview not ready for screenshot');
+                }
+            } catch (e) { console.error('screenshot capture failed', e); }
+        }
 
         if (msg.type === 'session-closed') {
             stopSharing();
