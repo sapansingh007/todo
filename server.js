@@ -7,9 +7,6 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 
-// parse JSON bodies for proxy endpoint
-app.use(express.json({ limit: '10mb' }));
-
 const PORT = process.env.PORT || 3000;
 
 // Serve static frontend from 'public'
@@ -17,6 +14,36 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Simple health check
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+// Hugging Face processing proxy (optional)
+// POST /hf-process { text: string, model?: string, options?: object }
+// Requires HF_API_TOKEN in env. This endpoint is additive and does not change signaling behavior.
+app.use(express.json({ limit: '1mb' }));
+app.post('/hf-process', async (req, res) => {
+    const HF_TOKEN = process.env.HF_API_TOKEN;
+    if (!HF_TOKEN) return res.status(501).json({ error: 'Hugging Face API token not configured on server' });
+    const { text, model = 'facebook/bart-large-cnn', options = {} } = req.body || {};
+    if (!text || typeof text !== 'string') return res.status(400).json({ error: 'text is required' });
+
+    try {
+        // Forward to Hugging Face Inference API
+        const fetch = require('node-fetch');
+        const url = `https://api-inference.huggingface.co/models/${encodeURIComponent(model)}`;
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${HF_TOKEN}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ inputs: text, parameters: options })
+        });
+        const j = await resp.json();
+        return res.json({ ok: true, model, result: j });
+    } catch (err) {
+        console.error('hf-process error', err);
+        return res.status(500).json({ error: 'hf-process failed', detail: err && err.message });
+    }
+});
 
 // Provide ICE servers (STUN + optional TURN) to clients
 app.get('/iceServers', (req, res) => {
@@ -29,47 +56,6 @@ app.get('/iceServers', (req, res) => {
         iceServers.push({ urls: turnUrl, username: turnUser, credential: turnPass });
     }
     res.json({ iceServers });
-});
-
-// Server-side OCR.space proxy endpoint
-// Accepts JSON: { base64Image: 'data:image/png;base64,...' }
-// Uses OCR_SPACE_API_KEY environment variable on the server — keeps the key secret
-app.post('/api/ocr', async (req, res) => {
-    try {
-        const apiKey = process.env.OCR_SPACE_API_KEY;
-        if (!apiKey) return res.status(500).json({ error: 'Server OCR key not configured' });
-        const { base64Image } = req.body || {};
-        if (!base64Image) return res.status(400).json({ error: 'base64Image required' });
-
-        // call OCR.space
-        const fetch = require('node-fetch');
-        const params = new URLSearchParams();
-        params.append('base64Image', base64Image);
-        params.append('language', 'eng');
-        params.append('isTable', 'false');
-        params.append('OCREngine', '2');
-
-        const resp = await fetch('https://api.ocr.space/parse/image', {
-            method: 'POST',
-            headers: {
-                'apikey': apiKey,
-                'Accept': 'application/json',
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: params.toString()
-        });
-
-        if (!resp.ok) {
-            const txt = await resp.text().catch(() => '');
-            return res.status(resp.status).json({ error: 'OCR provider error', details: txt });
-        }
-        const j = await resp.json();
-        const parsedText = (j && j.ParsedResults) ? j.ParsedResults.map(p => p.ParsedText || '').join('\n') : '';
-        return res.json({ text: parsedText, raw: null }); // explicitly do not return raw image data
-    } catch (err) {
-        console.error('OCR proxy error', err);
-        return res.status(500).json({ error: 'OCR proxy failed', details: err.message });
-    }
 });
 
 // Create a WebSocket server for signaling
