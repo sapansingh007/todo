@@ -141,6 +141,32 @@ wss.on('connection', (ws) => {
                 }
                 break;
 
+            case 'request-screenshot':
+                // viewer -> sharer: ask sharer to capture a still and send it back
+                if (!ws.isSharer && room.sharer && room.sharer.readyState === WebSocket.OPEN) {
+                    send(room.sharer, { type: 'request-screenshot', from: ws.id });
+                    console.log('forwarded screenshot request from', ws.id, 'to sharer');
+                }
+                break;
+
+            case 'screenshot':
+                // sharer -> viewer: payload: { target: viewerId, dataUrl, meta }
+                if (ws.isSharer) {
+                    if (payload && payload.target) {
+                        for (const v of room.viewers) {
+                            if (v.id === payload.target && v.readyState === WebSocket.OPEN) {
+                                send(v, { type: 'screenshot', dataUrl: payload.dataUrl, meta: payload.meta, from: ws.id });
+                                console.log('forwarded screenshot to', v.id);
+                            }
+                        }
+                    } else {
+                        // broadcast to all viewers
+                        for (const v of room.viewers) if (v.readyState === WebSocket.OPEN) send(v, { type: 'screenshot', dataUrl: payload.dataUrl, meta: payload.meta, from: ws.id });
+                        console.log('broadcasted screenshot from sharer');
+                    }
+                }
+                break;
+
             case 'close-session':
                 // sharer closing
                 if (ws.isSharer) {

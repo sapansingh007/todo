@@ -80,6 +80,28 @@ async function startSharing() {
             if (pc) { pc.close(); pcs.delete(id); }
         }
 
+            if (msg.type === 'request-screenshot') {
+                // msg.from is the viewer id requesting the screenshot
+                const targetViewer = msg.from;
+                console.log('Screenshot requested by', targetViewer);
+                // capture a frame from preview and send it
+                try {
+                    if (preview && preview.videoWidth && preview.videoHeight) {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = preview.videoWidth;
+                        canvas.height = preview.videoHeight;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(preview, 0, 0, canvas.width, canvas.height);
+                        const dataUrl = canvas.toDataURL('image/png');
+                        const meta = { capturedAt: new Date().toISOString() };
+                        ws.send(JSON.stringify({ type: 'screenshot', sessionId, payload: { target: targetViewer, dataUrl, meta } }));
+                        console.log('Sent screenshot to server for viewer', targetViewer);
+                    } else {
+                        console.warn('Preview not ready for screenshot');
+                    }
+                } catch (e) { console.error('screenshot capture failed', e); }
+            }
+
         if (msg.type === 'session-closed') {
             stopSharing();
         }
