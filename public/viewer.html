@@ -27,7 +27,21 @@
             <h2>Captured Screenshots</h2>
             <div id="shots"></div>
         </section>
+
+        <section id="ocrSection">
+            <h2>Extracted Text (OCR)</h2>
+            <div id="ocrControls">
+                <textarea id="ocrText" rows="6" readonly placeholder="OCR result will appear here..."></textarea>
+                <div class="ocr-actions">
+                    <button id="copyTextBtn">Copy</button>
+                    <button id="shareTextBtn">Share</button>
+                    <button id="clearTextBtn">Clear</button>
+                </div>
+            </div>
+        </section>
     </main>
+    <!-- Tesseract.js from CDN (lazy-heavy; used only when performing OCR) -->
+    <script src="https://unpkg.com/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
     <script src="/viewer.js"></script>
 </body>
 

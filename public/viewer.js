@@ -23,8 +23,43 @@ let watchdog = null;
 const PLAY_TIMEOUT = 5000; // ms to wait for frames before retry
 const SCREENSHOT_TIMEOUT = 12000; // ms to wait for a screenshot response
 let pendingScreenshotTimer = null;
+let ocrInProgress = false;
+let lastCanvas = null; // used temporarily for OCR
 
 function setStatus(s) { status.textContent = s }
+
+// Helpers for OCR UI
+const ocrTextArea = document.getElementById('ocrText');
+const copyTextBtn = document.getElementById('copyTextBtn');
+const shareTextBtn = document.getElementById('shareTextBtn');
+const clearTextBtn = document.getElementById('clearTextBtn');
+
+function setOcrLoading(on) {
+    const load = document.getElementById('screenshotLoading');
+    if (on) {
+        if (load) { load.style.display = 'inline'; load.innerHTML = '<span class="spinner" aria-hidden="true"></span> OCR...'; }
+    } else {
+        if (load) { load.style.display = 'none'; load.innerHTML = ''; }
+    }
+}
+
+copyTextBtn && copyTextBtn.addEventListener('click', () => {
+    if (!ocrTextArea || !ocrTextArea.value) return;
+    navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(ocrTextArea.value) : alert('Clipboard API not available');
+});
+
+shareTextBtn && shareTextBtn.addEventListener('click', async () => {
+    if (!ocrTextArea || !ocrTextArea.value) return;
+    if (navigator.share) {
+        try { await navigator.share({ text: ocrTextArea.value }); } catch (e) { console.warn('share failed', e); }
+    } else {
+        alert('Web Share API not available on this browser');
+    }
+});
+
+clearTextBtn && clearTextBtn.addEventListener('click', () => {
+    if (ocrTextArea) ocrTextArea.value = '';
+});
 
 function connectSignaling() {
     ws = new WebSocket((location.origin.replace(/^http/, 'ws')));
@@ -54,6 +89,13 @@ function connectSignaling() {
             setStatus('Screenshot received');
             // append to shots list
             appendScreenshotToList(msg.dataUrl, msg.meta);
+            // If an OCR request is waiting (we initiated OCR), run OCR on received image
+            if (ocrInProgress) {
+                // create an offscreen canvas from dataUrl and run OCR
+                try {
+                    await runOcrOnDataUrl(msg.dataUrl);
+                } catch (e) { console.error('OCR on received image failed', e); setStatus('OCR failed'); }
+            }
         }
         if (msg.type === 'session-closed') {
             setStatus('Session closed');
@@ -189,6 +231,15 @@ function takeScreenshot() {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/png');
 
+    // If on mobile we will run OCR instead of storing the image
+    if (isMobileDevice()) {
+        // run OCR directly and then clean up the image
+        runOcrOnCanvas(canvas).catch(e => console.warn('ocr failed', e));
+        // ensure we clear the canvas/image references afterwards
+        cleanupCanvas(canvas);
+        return;
+    }
+
     const wrapper = document.createElement('div');
     wrapper.className = 'shot';
     const img = document.createElement('img');
@@ -323,6 +374,79 @@ function appendScreenshotToList(dataUrl, meta) {
 async function takeScreenshotMobile() {
     const load = document.getElementById('screenshotLoading');
     const btn = document.getElementById('screenshotBtn');
+
+    // OCR helpers
+    async function runOcrOnCanvas(canvas) {
+        if (!window.Tesseract) throw new Error('Tesseract not loaded');
+        if (ocrInProgress) return;
+        ocrInProgress = true;
+        setOcrLoading(true);
+        setStatus('Running OCR...');
+
+        // store the canvas reference temporarily for cleanup
+        lastCanvas = canvas;
+
+        try {
+            const { Tesseract } = window;
+            const worker = Tesseract.createWorker({
+                logger: m => console.log('tesseract', m)
+            });
+            await worker.load();
+            await worker.loadLanguage('eng');
+            await worker.initialize('eng');
+            // convert canvas to blob and pass to recognize
+            const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+            const { data: { text } } = await worker.recognize(blob);
+            // show text and then clean up
+            if (ocrTextArea) ocrTextArea.value = text || '';
+            await worker.terminate();
+            setStatus('OCR complete');
+            // cleanup canvas and blob references
+            cleanupCanvas(lastCanvas);
+            lastCanvas = null;
+        } catch (err) {
+            console.error('OCR error', err);
+            setStatus('OCR failed');
+        } finally {
+            setOcrLoading(false);
+            ocrInProgress = false;
+        }
+    }
+
+    async function runOcrOnDataUrl(dataUrl) {
+        // create canvas from dataUrl
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = async () => {
+                const c = document.createElement('canvas');
+                c.width = img.naturalWidth;
+                c.height = img.naturalHeight;
+                const ctx = c.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                try {
+                    await runOcrOnCanvas(c);
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                }
+            };
+            img.onerror = (e) => reject(new Error('Image load failed for OCR'));
+            img.src = dataUrl;
+        });
+    }
+
+    function cleanupCanvas(c) {
+        try {
+            if (!c) return;
+            const ctx = c.getContext && c.getContext('2d');
+            if (ctx) { ctx.clearRect(0, 0, c.width, c.height); }
+            // zero sizes to free memory
+            c.width = 0; c.height = 0;
+            // remove DOM reference if attached
+            if (c.parentNode) c.parentNode.removeChild(c);
+        } catch (e) { console.warn('cleanupCanvas failed', e); }
+    }
     // show inline spinner
     if (load) { load.style.display = 'inline'; load.innerHTML = '<span class="spinner" aria-hidden="true"></span>'; }
     if (btn) btn.disabled = true;
