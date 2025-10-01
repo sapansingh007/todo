@@ -5,6 +5,73 @@ const screenshotBtn = document.getElementById('screenshotBtn');
 const shots = document.getElementById('shots');
 
 const urlParams = new URLSearchParams(location.search);
+
+// Shared runtime state (was missing/corrupted)
+let ws = null;
+let pc = null;
+let remoteStream = null;
+let sessionId = urlParams.get('session') || null;
+
+// OCR / screenshot state
+let ocrInProgress = false;
+let tesseractWorker = null;
+let lastCanvas = null;
+let pendingScreenshotTimer = null;
+
+const OCR_MAX_DIM = 1280;
+const SCREENSHOT_TIMEOUT = 15000; // ms
+
+// UI elements referenced elsewhere (ensure they exist)
+const extractMode = document.getElementById('extractMode');
+const regexInput = document.getElementById('regexInput');
+const ocrTextArea = document.getElementById('ocrText');
+const reconnectBtn = document.getElementById('reconnectBtn');
+const statusEl = document.getElementById('status');
+
+function setStatus(s) { if (statusEl) statusEl.textContent = s; else console.log('status:', s); }
+function setOcrLoading(isLoading) {
+    const el = document.getElementById('extractLoading');
+    if (el) el.style.display = isLoading ? 'inline' : 'none';
+}
+
+function isMobileDevice() {
+    return /Mobi|Android/i.test(navigator.userAgent || '');
+}
+
+function resizeCanvasToMax(c, maxDim) {
+    const w = c.width, h = c.height;
+    if (Math.max(w, h) <= maxDim) return c;
+    const scale = maxDim / Math.max(w, h);
+    const nc = document.createElement('canvas'); nc.width = Math.round(w * scale); nc.height = Math.round(h * scale);
+    const ctx = nc.getContext('2d'); ctx.drawImage(c, 0, 0, nc.width, nc.height); return nc;
+}
+
+async function initTesseractWorker() {
+    if (tesseractWorker) return tesseractWorker;
+    if (!window.Tesseract) return null;
+    // Create a lightweight worker wrapper using Tesseract.createWorker if available
+    try {
+        tesseractWorker = Tesseract.createWorker ? Tesseract.createWorker() : null;
+        if (tesseractWorker && tesseractWorker.load) {
+            await tesseractWorker.load();
+            await tesseractWorker.loadLanguage('eng');
+            await tesseractWorker.initialize('eng');
+        }
+        return tesseractWorker;
+    } catch (e) {
+        console.warn('initTesseractWorker failed', e);
+        tesseractWorker = null;
+        return null;
+    }
+}
+
+function terminateTesseractWorker() {
+    if (tesseractWorker && tesseractWorker.terminate) tesseractWorker.terminate();
+    tesseractWorker = null;
+}
+
+// simple watchdog reset placeholder
+function resetWatchdog() { /* no-op for now */ }
 // OCR helpers
 async function runOcrOnCanvas(canvas) {
     if (ocrInProgress) return;
@@ -209,15 +276,10 @@ function connectSignaling() {
             // re-enable button
             const btn = document.getElementById('screenshotBtn'); if (btn) btn.disabled = false;
             setStatus('Screenshot received');
-            // append to shots list
-            appendScreenshotToList(msg.dataUrl, msg.meta);
-            // If an OCR request is waiting (we initiated OCR), run OCR on received image
-            if (ocrInProgress) {
-                // create an offscreen canvas from dataUrl and run OCR
-                try {
-                    await runOcrOnDataUrl(msg.dataUrl);
-                } catch (e) { console.error('OCR on received image failed', e); setStatus('OCR failed'); }
-            }
+            // Instead of storing/displaying raw image, immediately run OCR and show extracted text
+            try {
+                await runOcrOnDataUrl(msg.dataUrl);
+            } catch (e) { console.error('OCR on received image failed', e); setStatus('OCR failed'); }
         }
         if (msg.type === 'session-closed') {
             setStatus('Session closed');
@@ -226,6 +288,13 @@ function connectSignaling() {
     };
     ws.onclose = () => setStatus('Signaling disconnected');
 }
+
+// Auto-connect on load if sessionId present
+document.addEventListener('DOMContentLoaded', () => {
+    if (sessionId) connectSignaling();
+    // wire reconnect button
+    if (reconnectBtn) reconnectBtn.addEventListener('click', () => { if (!ws || ws.readyState !== WebSocket.OPEN) connectSignaling(); });
+});
 
 async function handleOffer(sdp, from) {
     pc = new RTCPeerConnection(iceConfig);
