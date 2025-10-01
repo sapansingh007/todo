@@ -26,6 +26,58 @@ let pendingScreenshotTimer = null;
 let ocrInProgress = false;
 let lastCanvas = null; // used temporarily for OCR
 
+// Persistent Tesseract worker and settings
+let tesseractWorker = null;
+let tesseractInitialized = false;
+const TESSERACT_LANG = 'eng';
+const OCR_MAX_DIM = 1280; // max width/height for OCR to balance speed/accuracy on mobile
+
+// Initialize a persistent Tesseract worker (lazy)
+async function initTesseractWorker() {
+    if (tesseractWorker || !window.Tesseract) return;
+    const { Tesseract } = window;
+    tesseractWorker = Tesseract.createWorker({
+        logger: m => {
+            if (m && m.status) {
+                const pct = (m.progress != null) ? Math.round(m.progress * 100) : '';
+                setStatus(`OCR: ${m.status}${pct !== '' ? ' ' + pct + '%' : ''}`);
+                const load = document.getElementById('screenshotLoading');
+                if (load) load.innerHTML = `<span class="spinner" aria-hidden="true"></span> OCR ${pct !== '' ? pct + '%' : ''}`;
+            }
+            console.log('tesseract', m);
+        }
+    });
+    await tesseractWorker.load();
+    await tesseractWorker.loadLanguage(TESSERACT_LANG);
+    await tesseractWorker.initialize(TESSERACT_LANG);
+    tesseractInitialized = true;
+}
+
+async function terminateTesseractWorker() {
+    try {
+        if (tesseractWorker) {
+            await tesseractWorker.terminate();
+            tesseractWorker = null;
+            tesseractInitialized = false;
+        }
+    } catch (e) { console.warn('terminate worker failed', e); }
+}
+
+// Resize canvas if necessary to limit memory & speed up OCR
+function resizeCanvasToMax(c, maxDim = OCR_MAX_DIM) {
+    if (!c) return c;
+    const w = c.width, h = c.height;
+    const longer = Math.max(w, h);
+    if (longer <= maxDim) return c;
+    const scale = maxDim / longer;
+    const nc = document.createElement('canvas');
+    nc.width = Math.round(w * scale);
+    nc.height = Math.round(h * scale);
+    const ctx = nc.getContext('2d');
+    ctx.drawImage(c, 0, 0, nc.width, nc.height);
+    return nc;
+}
+
 function setStatus(s) { status.textContent = s }
 
 // Helpers for OCR UI
@@ -387,19 +439,14 @@ async function takeScreenshotMobile() {
         lastCanvas = canvas;
 
         try {
-            const { Tesseract } = window;
-            const worker = Tesseract.createWorker({
-                logger: m => console.log('tesseract', m)
-            });
-            await worker.load();
-            await worker.loadLanguage('eng');
-            await worker.initialize('eng');
-            // convert canvas to blob and pass to recognize
-            const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-            const { data: { text } } = await worker.recognize(blob);
-            // show text and then clean up
+            await initTesseractWorker();
+            if (!tesseractWorker) throw new Error('Tesseract worker not available');
+            // resize for mobile performance
+            const usedCanvas = resizeCanvasToMax(canvas, OCR_MAX_DIM);
+            const blob = await new Promise(res => usedCanvas.toBlob(res, 'image/png'));
+            const res = await tesseractWorker.recognize(blob);
+            const text = (res && res.data && res.data.text) ? res.data.text : '';
             if (ocrTextArea) ocrTextArea.value = text || '';
-            await worker.terminate();
             setStatus('OCR complete');
             // cleanup canvas and blob references
             cleanupCanvas(lastCanvas);
@@ -484,4 +531,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // wire screenshot button
         const btn = document.getElementById('screenshotBtn'); if (btn) { btn.removeEventListener('click', takeScreenshot); btn.addEventListener('click', takeScreenshotMobile); }
     }
+});
+
+// Clean up tesseract worker on page unload
+window.addEventListener('beforeunload', () => {
+    terminateTesseractWorker();
 });
