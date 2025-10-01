@@ -138,6 +138,33 @@ button {
     color: #111827
 }
 
+#extractSection {
+    margin-top: 18px;
+}
+
+#extractControls input,
+#extractControls select {
+    width: 100%;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+}
+
+#extractResult {
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px dashed #cbd5e1;
+    background: #f8fafc;
+}
+
+.extract-item {
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: #fff;
+    margin-bottom: 6px;
+    border: 1px solid #e5e7eb;
+}
+
 /* Mobile-specific UI */
 @media (max-width: 640px) {
     .container {

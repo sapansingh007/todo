@@ -113,6 +113,81 @@ clearTextBtn && clearTextBtn.addEventListener('click', () => {
     if (ocrTextArea) ocrTextArea.value = '';
 });
 
+// Extraction UI wiring
+const extractMode = document.getElementById('extractMode');
+const keywordsInput = document.getElementById('keywordsInput');
+const regexInput = document.getElementById('regexInput');
+const aiEndpoint = document.getElementById('aiEndpoint');
+const aiPrompt = document.getElementById('aiPrompt');
+const extractBtn = document.getElementById('extractBtn');
+const extractLoading = document.getElementById('extractLoading');
+const extractResult = document.getElementById('extractResult');
+
+if (extractMode) {
+    extractMode.addEventListener('change', () => {
+        document.querySelectorAll('.extract-mode').forEach(el => el.style.display = 'none');
+        const mode = extractMode.value;
+        const el = document.getElementById('mode' + (mode[0].toUpperCase() + mode.slice(1)));
+        if (el) el.style.display = 'block';
+    });
+}
+
+function simpleKeywordExtract(text, keywords) {
+    const found = [];
+    const lines = text.split(/\r?\n/);
+    const kws = keywords.split(',').map(s => s.trim()).filter(Boolean).map(s => s.toLowerCase());
+    for (const line of lines) {
+        const l = line.toLowerCase();
+        for (const k of kws) if (l.includes(k)) found.push(line.trim());
+    }
+    return [...new Set(found)];
+}
+
+function regexExtract(text, pattern) {
+    try {
+        // support leading/trailing slashes and flags
+        const m = pattern.match(/^\/(.*)\/(\w*)$/);
+        let re;
+        if (m) re = new RegExp(m[1], m[2]); else re = new RegExp(pattern, 'g');
+        const matches = text.match(re);
+        return matches || [];
+    } catch (e) { return []; }
+}
+
+async function aiExtract(text, endpoint, prompt) {
+    // POST to user-provided endpoint that accepts { text, prompt }
+    if (!endpoint) throw new Error('AI endpoint not provided');
+    const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, prompt }) });
+    if (!res.ok) throw new Error('AI endpoint error ' + res.status);
+    const j = await res.json();
+    // expect { extracted: '...' } or fallback to raw text
+    return j.extracted || j.result || j.text || JSON.stringify(j);
+}
+
+extractBtn && extractBtn.addEventListener('click', async () => {
+    const text = ocrTextArea ? ocrTextArea.value : '';
+    extractResult.innerHTML = '';
+    if (!text) { extractResult.textContent = 'No OCR text to extract from.'; return; }
+    const mode = extractMode ? extractMode.value : 'keywords';
+    extractLoading.style.display = 'inline';
+    try {
+        if (mode === 'keywords') {
+            const found = simpleKeywordExtract(text, keywordsInput.value || '');
+            if (found.length === 0) extractResult.textContent = 'No matches found.';
+            else found.forEach(f => { const d = document.createElement('div'); d.className = 'extract-item'; d.textContent = f; extractResult.appendChild(d); });
+        } else if (mode === 'regex') {
+            const found = regexExtract(text, regexInput.value || '');
+            if (found.length === 0) extractResult.textContent = 'No matches found.';
+            else found.forEach(f => { const d = document.createElement('div'); d.className = 'extract-item'; d.textContent = f; extractResult.appendChild(d); });
+        } else if (mode === 'ai') {
+            const out = await aiExtract(text, aiEndpoint.value, aiPrompt.value);
+            const d = document.createElement('div'); d.className = 'extract-item'; d.textContent = out; extractResult.appendChild(d);
+        }
+    } catch (e) {
+        extractResult.textContent = 'Extraction failed: ' + (e && e.message ? e.message : '');
+    } finally { extractLoading.style.display = 'none'; }
+});
+
 function connectSignaling() {
     ws = new WebSocket((location.origin.replace(/^http/, 'ws')));
     ws.onopen = () => {
