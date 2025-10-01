@@ -115,7 +115,7 @@ clearTextBtn && clearTextBtn.addEventListener('click', () => {
 
 // Extraction UI wiring
 const extractMode = document.getElementById('extractMode');
-const keywordsInput = document.getElementById('keywordsInput');
+// keywords removed — full text extraction is default
 const regexInput = document.getElementById('regexInput');
 const aiEndpoint = document.getElementById('aiEndpoint');
 const aiPrompt = document.getElementById('aiPrompt');
@@ -132,16 +132,7 @@ if (extractMode) {
     });
 }
 
-function simpleKeywordExtract(text, keywords) {
-    const found = [];
-    const lines = text.split(/\r?\n/);
-    const kws = keywords.split(',').map(s => s.trim()).filter(Boolean).map(s => s.toLowerCase());
-    for (const line of lines) {
-        const l = line.toLowerCase();
-        for (const k of kws) if (l.includes(k)) found.push(line.trim());
-    }
-    return [...new Set(found)];
-}
+// full text extraction replaces keyword-based extraction
 
 function regexExtract(text, pattern) {
     try {
@@ -168,13 +159,14 @@ extractBtn && extractBtn.addEventListener('click', async () => {
     const text = ocrTextArea ? ocrTextArea.value : '';
     extractResult.innerHTML = '';
     if (!text) { extractResult.textContent = 'No OCR text to extract from.'; return; }
-    const mode = extractMode ? extractMode.value : 'keywords';
+    const mode = extractMode ? extractMode.value : 'fulltext';
     extractLoading.style.display = 'inline';
     try {
-        if (mode === 'keywords') {
-            const found = simpleKeywordExtract(text, keywordsInput.value || '');
-            if (found.length === 0) extractResult.textContent = 'No matches found.';
-            else found.forEach(f => { const d = document.createElement('div'); d.className = 'extract-item'; d.textContent = f; extractResult.appendChild(d); });
+        if (mode === 'fulltext') {
+            // show the full OCR output as a single result item
+            const d = document.createElement('div'); d.className = 'extract-item';
+            d.textContent = text || '(no text detected)';
+            extractResult.appendChild(d);
         } else if (mode === 'regex') {
             const found = regexExtract(text, regexInput.value || '');
             if (found.length === 0) extractResult.textContent = 'No matches found.';

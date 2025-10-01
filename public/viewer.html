@@ -40,32 +40,35 @@
             </div>
         </section>
         <section id="extractSection">
-            <h2>Targeted Extraction</h2>
+            <h2>Extraction</h2>
             <div id="extractControls">
                 <label>Mode:
                     <select id="extractMode">
-                        <option value="keywords">Keywords</option>
+                        <option value="fulltext">Full Text</option>
                         <option value="regex">Regex</option>
                         <option value="ai">AI Assist (requires endpoint)</option>
                     </select>
                 </label>
-                <div id="modeKeywords" class="extract-mode">
-                    <input id="keywordsInput"
-                        placeholder="Enter comma-separated keywords (e.g., Invoice, Total, Date)" />
+                <div id="modeFulltext" class="extract-mode">
+                    <div style="font-size:13px; color:#444;">Returns the full OCR text output.</div>
                 </div>
+                +
                 <div id="modeRegex" class="extract-mode" style="display:none;">
-                    <input id="regexInput" placeholder="Enter JS regex (e.g., /\b\d{4}-\d{2}-\d{2}\b/g)" />
+                    <input id="regexInput" placeholder="Enter JS regex (e.g., /\\b\\d{4}-\\d{2}-\\d{2}\\b/g)" />
                 </div>
                 <div id="modeAI" class="extract-mode" style="display:none;">
                     <input id="aiEndpoint" placeholder="AI endpoint URL (POST)" />
                     <input id="aiPrompt" placeholder="Request prompt / instruction (optional)" />
                 </div>
-                <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+                + <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
                     <button id="extractBtn">Extract</button>
                     <span id="extractLoading" style="display:none;"></span>
+                    +
                 </div>
-                <div id="extractResult" style="margin-top:8px;"></div>
+                + <div id="extractResult" style="margin-top:8px;"></div>
+                +
             </div>
+            +
         </section>
     </main>
     <!-- Tesseract.js from CDN (lazy-heavy; used only when performing OCR) -->
